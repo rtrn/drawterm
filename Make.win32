@@ -3,8 +3,8 @@
 # on another platform.  Otherwise the binaries are just
 # named gcc, etc.
 
-MING=i586-mingw32msvc-
-#MING=
+#MING=i586-mingw32msvc-
+MING=
 AR=$(MING)ar
 CC=$(MING)gcc
 AS=$(MING)as
