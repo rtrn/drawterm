@@ -14,7 +14,6 @@
 #include <memdraw.h>
 #include "screen.h"
 #include "keyboard.h"
-#include "r16.h"
 
 Memimage	*gscreen;
 Screeninfo	screen;
@@ -556,14 +555,14 @@ setcolor(ulong index, ulong red, ulong green, ulong blue)
 uchar*
 clipreadunicode(HANDLE h)
 {
-	Rune16 *p;
+	wchar_t *p;
 	int n;
 	uchar *q;
 
 	p = GlobalLock(h);
-	n = rune16nlen(p, runes16len(p)+1);
+	n = WideCharToMultiByte(CP_UTF8, 0, p, -1, nil, 0, nil, nil);
 	q = malloc(n);
-	runes16toutf(q, p, n);
+	WideCharToMultiByte(CP_UTF8, 0, p, -1, q, n, nil, nil);
 	GlobalUnlock(h);
 
 	return q;
@@ -609,9 +608,9 @@ int
 clipwrite(char *buf)
 {
 	HANDLE h;
-	char *p, *e;
-	Rune16 *rp;
-	int n = strlen(buf);
+	char *p;
+	wchar_t *wp;
+	int n, wn;
 
 	if(!OpenClipboard(window)) {
 		oserror();
@@ -624,23 +623,23 @@ clipwrite(char *buf)
 		return -1;
 	}
 
-	h = GlobalAlloc(GMEM_MOVEABLE|GMEM_DDESHARE, (n+1)*sizeof(Rune));
-	if(h == NULL)
+	wn = MultiByteToWideChar(CP_UTF8, 0, buf, -1, nil, 0);
+	h = GlobalAlloc(GMEM_MOVEABLE, wn*sizeof(wchar_t));
+	if(h == nil)
 		panic("out of memory");
-	rp = GlobalLock(h);
-	utftorunes16(rp, buf, n+1);
+	wp = GlobalLock(h);
+	MultiByteToWideChar(CP_UTF8, 0, buf, -1, wp, wn);
 	GlobalUnlock(h);
-
 	SetClipboardData(CF_UNICODETEXT, h);
 
-	h = GlobalAlloc(GMEM_MOVEABLE|GMEM_DDESHARE, n+1);
-	if(h == NULL)
+	n = strlen(buf);
+	h = GlobalAlloc(GMEM_MOVEABLE, n+1);
+	if(h == nil)
 		panic("out of memory");
 	p = GlobalLock(h);
 	memcpy(p, buf, n);
 	p[n] = 0;
 	GlobalUnlock(h);
-	
 	SetClipboardData(CF_TEXT, h);
 
 	CloseClipboard();

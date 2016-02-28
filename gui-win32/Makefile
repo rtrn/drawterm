@@ -8,7 +8,6 @@ OFILES=\
 	draw.$O\
 	load.$O\
 	screen.$O\
-	r16.$O
 
 default: $(LIB)
 $(LIB): $(OFILES)
