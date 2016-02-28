@@ -448,23 +448,18 @@ oserrstr(void)
 long
 showfilewrite(char *a, int n)
 {
-	Rune *action, *arg, *cmd, *p;
-	static Rune Lopen[] = { 'o', 'p', 'e', 'n', 0 };
+	wchar_t *file;
+	int nfile;
 
-	cmd = runesmprint("%.*s", n, a);
-	if(cmd == nil)
-		error("out of memory");
-	if(cmd[runestrlen(cmd)-1] == '\n')
-		cmd[runestrlen(cmd)] = 0;
-	p = runestrchr(cmd, ' ');
-	if(p){
-		action = cmd;
-		*p++ = 0;
-		arg = p;
-	}else{
-		action = Lopen;
-		arg = cmd;
-	}
-	ShellExecute(0, 0, action, arg, 0, SW_SHOWNORMAL);
+	nfile = MultiByteToWideChar(CP_UTF8, 0, a, n, nil, 0);
+	file = malloc((nfile+1)*sizeof(wchar_t));
+	if(file == nil)
+		return 0;
+	MultiByteToWideChar(CP_UTF8, 0, a, n, file, nfile);
+	file[nfile] = '\0';
+	if(file[nfile-1] == '\n')
+		file[nfile-1] = '\0';
+	ShellExecute(nil, nil, file, nil, nil, SW_SHOWNORMAL);
+	free(file);
 	return n;
 }
