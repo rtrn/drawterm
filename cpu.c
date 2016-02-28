@@ -115,11 +115,7 @@ cpumain(int argc, char **argv)
 	user = getenv("USER");
 	secstoreserver = nil;
 	authserver = getenv("auth");
-	if(authserver == nil)
-		authserver = "auth";
 	system = getenv("cpu");
-	if(system == nil)
-		system = "cpu";
 	ARGBEGIN{
 	case 'a':
 		authserver = EARGF(usage());
@@ -163,6 +159,10 @@ cpumain(int argc, char **argv)
 	if(argc != 0)
 		usage();
 
+	if(authserver == nil)
+		authserver = readcons("authserver", nil, 0);
+	if(system == nil)
+		system = readcons("cpuserver", nil, 0);
 	if(user == nil)
 		user = readcons("user", nil, 0);
 
