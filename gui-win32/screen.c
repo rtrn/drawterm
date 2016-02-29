@@ -328,6 +328,7 @@ WindowProc(HWND hwnd, UINT msg, WPARAM wparam, LPARAM lparam)
 	Rectangle r;
 
 	b = 0;
+
 	switch(msg){
 	case WM_CREATE:
 		break;
@@ -339,10 +340,11 @@ WindowProc(HWND hwnd, UINT msg, WPARAM wparam, LPARAM lparam)
 		}
 		return DefWindowProc(hwnd, msg, wparam, lparam);
 	case WM_MOUSEWHEEL:
-		if((int)(wparam & 0xFFFF0000)>0)
-			b|=8;
+		if((int)(wparam & 0xFFFF0000) > 0)
+			b |= 8;
 		else
-			b|=16;
+			b |= 16;
+		/* FALLTHROUGH */
 	case WM_MOUSEMOVE:
 	case WM_LBUTTONUP:
 	case WM_MBUTTONUP:
@@ -353,7 +355,7 @@ WindowProc(HWND hwnd, UINT msg, WPARAM wparam, LPARAM lparam)
 		x = LOWORD(lparam);
 		y = HIWORD(lparam);
 		if(wparam & MK_LBUTTON)
-			b = 1;
+			b |= 1;
 		if(wparam & MK_MBUTTON)
 			b |= 2;
 		if(wparam & MK_RBUTTON){
@@ -451,7 +453,7 @@ WindowProc(HWND hwnd, UINT msg, WPARAM wparam, LPARAM lparam)
 	case WM_PALETTECHANGED:
 		if((HWND)wparam == hwnd)
 			break;
-	/* fall through */
+		/* FALLTHROUGH */
 	case WM_QUERYNEWPALETTE:
 		hdc = GetDC(hwnd);
 		SelectPalette(hdc, palette, 0);
