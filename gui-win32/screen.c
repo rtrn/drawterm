@@ -25,11 +25,11 @@ static	HINSTANCE	inst;
 static	HWND		window;
 static	HPALETTE	palette;
 static	LOGPALETTE	*logpal;
-static  Lock		gdilock;
+static	Lock		gdilock;
 static 	BITMAPINFO	*bmi;
 static	HCURSOR		hcursor;
 
-static void	winproc(void *);
+static void	winproc(void*);
 static LRESULT CALLBACK WindowProc(HWND hwnd, UINT msg, WPARAM wparam, LPARAM lparam);
 static void	paletteinit(void);
 static void	bmiinit(void);
@@ -195,7 +195,7 @@ winproc(void *a)
 	window = CreateWindowEx(
 		0,			/* extended style */
 		L"9pmgraphics",		/* class */
-		L"drawterm screen",		/* caption */
+		L"drawterm",			/* caption */
 		WS_OVERLAPPEDWINDOW,    /* style */
 		CW_USEDEFAULT,		/* init. x pos */
 		CW_USEDEFAULT,		/* init. y pos */
@@ -218,7 +218,7 @@ winproc(void *a)
 
 	screen.reshaped = 0;
 
-	while(GetMessage(&msg, NULL, 0, 0)) {
+	while(GetMessage(&msg, NULL, 0, 0)){
 		TranslateMessage(&msg);
 		DispatchMessage(&msg);
 	}
@@ -237,7 +237,6 @@ col(int v, int n)
 	return c >> 8;
 }
 
-
 void
 paletteinit(void)
 {
@@ -253,9 +252,9 @@ paletteinit(void)
 	logpal->palNumEntries = 256;
 	pal = logpal->palPalEntry;
 
-	for(r=0,i=0; r<4; r++) {
+	for(r=0,i=0; r<4; r++){
 		for(v=0; v<4; v++,i+=16){
-			for(g=0,j=v-r; g<4; g++) {
+			for(g=0,j=v-r; g<4; g++){
 				for(b=0; b<4; b++,j++){
 					den=r;
 					if(g>den)
@@ -281,7 +280,6 @@ paletteinit(void)
 	}
 	palette = CreatePalette(logpal);
 }
-
 
 void
 getcolor(ulong i, ulong *r, ulong *g, ulong *b)
@@ -330,18 +328,18 @@ WindowProc(HWND hwnd, UINT msg, WPARAM wparam, LPARAM lparam)
 	Rectangle r;
 
 	b = 0;
-	switch(msg) {
+	switch(msg){
 	case WM_CREATE:
 		break;
 	case WM_SETCURSOR:
 		/* User set */
-		if(hcursor != NULL) {
+		if(hcursor != NULL){
 			SetCursor(hcursor);
 			return 1;
 		}
 		return DefWindowProc(hwnd, msg, wparam, lparam);
 	case WM_MOUSEWHEEL:
-		if ((int)(wparam & 0xFFFF0000)>0)
+		if((int)(wparam & 0xFFFF0000)>0)
 			b|=8;
 		else
 			b|=16;
@@ -358,7 +356,7 @@ WindowProc(HWND hwnd, UINT msg, WPARAM wparam, LPARAM lparam)
 			b = 1;
 		if(wparam & MK_MBUTTON)
 			b |= 2;
-		if(wparam & MK_RBUTTON) {
+		if(wparam & MK_RBUTTON){
 			if(wparam & MK_SHIFT)
 				b |= 2;
 			else
@@ -366,16 +364,16 @@ WindowProc(HWND hwnd, UINT msg, WPARAM wparam, LPARAM lparam)
 		}
 		lock(&mouse.lk);
 		i = mouse.wi;
-		if(mousequeue) {
-			if(i == mouse.ri || mouse.lastb != b || mouse.trans) {
+		if(mousequeue){
+			if(i == mouse.ri || mouse.lastb != b || mouse.trans){
 				mouse.wi = (i+1)%Mousequeue;
 				if(mouse.wi == mouse.ri)
 					mouse.ri = (mouse.ri+1)%Mousequeue;
 				mouse.trans = mouse.lastb != b;
-			} else {
+			}else{
 				i = (i-1+Mousequeue)%Mousequeue;
 			}
-		} else {
+		}else{
 			mouse.wi = (i+1)%Mousequeue;
 			mouse.ri = i;
 		}
@@ -405,7 +403,7 @@ WindowProc(HWND hwnd, UINT msg, WPARAM wparam, LPARAM lparam)
 		break;
 	case WM_SYSKEYDOWN:
 	case WM_KEYDOWN:
-		switch(wparam) {
+		switch(wparam){
 		case VK_MENU:
 			kbdputc(kbdq, Kalt);
 			break;
@@ -509,8 +507,8 @@ setcursor(void)
 	xor = mallocz(h*w, 1);
 	
 	lock(&cursor.lk);
-	for(y=0,sp=cursor.set,cp=cursor.clr; y<16; y++) {
-		for(x=0; x<2; x++) {
+	for(y=0,sp=cursor.set,cp=cursor.clr; y<16; y++){
+		for(x=0; x<2; x++){
 			and[y*w+x] = ~(*sp|*cp);
 			xor[y*w+x] = ~*sp & *cp;
 			cp++;
@@ -520,7 +518,7 @@ setcursor(void)
 	nh = CreateCursor(inst, -cursor.offset.x, -cursor.offset.y,
 			GetSystemMetrics(SM_CXCURSOR), h,
 			and, xor);
-	if(nh != NULL) {
+	if(nh != NULL){
 		SetCursor(nh);
 		if(hcursor != NULL)
 			DestroyCursor(hcursor);
@@ -537,7 +535,7 @@ setcursor(void)
 void
 cursorarrow(void)
 {
-	if(hcursor != 0) {
+	if(hcursor != 0){
 		DestroyCursor(hcursor);
 		hcursor = 0;
 	}
@@ -545,19 +543,17 @@ cursorarrow(void)
 	PostMessage(window, WM_SETCURSOR, (int)window, 0);
 }
 
-
 void
 setcolor(ulong index, ulong red, ulong green, ulong blue)
 {
 }
 
-
-uchar*
+char*
 clipreadunicode(HANDLE h)
 {
 	wchar_t *p;
 	int n;
-	uchar *q;
+	char *q;
 
 	p = GlobalLock(h);
 	n = WideCharToMultiByte(CP_UTF8, 0, p, -1, nil, 0, nil, nil);
@@ -568,10 +564,10 @@ clipreadunicode(HANDLE h)
 	return q;
 }
 
-uchar *
+char*
 clipreadutf(HANDLE h)
 {
-	uchar *p;
+	char *p;
 
 	p = GlobalLock(h);
 	p = strdup(p);
@@ -584,9 +580,9 @@ char*
 clipread(void)
 {
 	HANDLE h;
-	uchar *p;
+	char *p;
 
-	if(!OpenClipboard(window)) {
+	if(!OpenClipboard(window)){
 		oserror();
 		return strdup("");
 	}
@@ -595,7 +591,7 @@ clipread(void)
 		p = clipreadunicode(h);
 	else if((h = GetClipboardData(CF_TEXT)))
 		p = clipreadutf(h);
-	else {
+	else{
 		oserror();
 		p = strdup("");
 	}
@@ -612,12 +608,12 @@ clipwrite(char *buf)
 	wchar_t *wp;
 	int n, wn;
 
-	if(!OpenClipboard(window)) {
+	if(!OpenClipboard(window)){
 		oserror();
 		return -1;
 	}
 
-	if(!EmptyClipboard()) {
+	if(!EmptyClipboard()){
 		oserror();
 		CloseClipboard();
 		return -1;
