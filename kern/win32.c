@@ -207,92 +207,20 @@ fastticks(uvlong *v)
 }
 #endif
 
-extern int	main(int, char*[]);
-
-
-int
-wstrutflen(Rune *s)
-{
-	int n;
-	
-	for(n=0; *s; n+=runelen(*s),s++)
-		;
-	return n;
-}
-
-int
-wstrtoutf(char *s, Rune *t, int n)
-{
-	int i;
-	char *s0;
-
-	s0 = s;
-	if(n <= 0)
-		return wstrutflen(t)+1;
-	while(*t) {
-		if(n < UTFmax+1 && n < runelen(*t)+1) {
-			*s = 0;
-			return s-s0+wstrutflen(t)+1;
-		}
-		i = runetochar(s, t);
-		s += i;
-		n -= i;
-		t++;
-	}
-	*s = 0;
-	return s-s0;
-}
-
-int
-win_hasunicode(void)
-{
-	OSVERSIONINFOA osinfo;
-	int r;
-
-	osinfo.dwOSVersionInfoSize = sizeof(osinfo);
-	if(!GetVersionExA(&osinfo))
-		panic("GetVersionEx failed");
-	switch(osinfo.dwPlatformId) {
-	default:
-		panic("unknown PlatformId");
-	case VER_PLATFORM_WIN32s:
-		panic("Win32s not supported");
-	case VER_PLATFORM_WIN32_WINDOWS:
-		r = 0;
-		break;
-	case VER_PLATFORM_WIN32_NT:
-		r = 1;
-		break;
-	}
-
-	return r;
-}
-
-int
-wstrlen(Rune *s)
-{
-	int n;
-
-	for(n=0; *s; s++,n++)
-		;
-	return n;
-}
-static int	args(char *argv[], int n, char *p);
+extern	int	main(int, char*[]);
+static	int	args(char*[], int, char*);
 
 int APIENTRY
 WinMain(HINSTANCE x, HINSTANCE y, LPSTR z, int w)
 {
 	int argc, n;
 	char *arg, *p, **argv;
-	Rune *warg;
+	wchar_t *warg;
 
-	if(0 && win_hasunicode()){
-		warg = GetCommandLineW();
-		n = (wstrlen(warg)+1)*UTFmax;
-		arg = malloc(n);
-		wstrtoutf(arg, warg, n);
-	}else
-		arg = GetCommandLineA();
+	warg = GetCommandLine();
+	n = WideCharToMultiByte(CP_UTF8, 0, warg, -1, nil, 0, nil, nil);
+	arg = malloc(n);
+	WideCharToMultiByte(CP_UTF8, 0, warg, -1, arg, n, nil, nil);
 
 	/* conservative guess at the number of args */
 	for(argc=4,p=arg; *p; p++)
@@ -454,11 +382,11 @@ showfilewrite(char *a, int n)
 	nfile = MultiByteToWideChar(CP_UTF8, 0, a, n, nil, 0);
 	file = malloc((nfile+1)*sizeof(wchar_t));
 	if(file == nil)
-		return 0;
+		error("out of memory");
 	MultiByteToWideChar(CP_UTF8, 0, a, n, file, nfile);
+	while(nfile>0 && file[nfile-1]=='\n')
+		nfile--;
 	file[nfile] = '\0';
-	if(file[nfile-1] == '\n')
-		file[nfile-1] = '\0';
 	ShellExecute(nil, nil, file, nil, nil, SW_SHOWNORMAL);
 	free(file);
 	return n;

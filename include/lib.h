@@ -72,9 +72,6 @@ extern	int	chartorune(Rune*, char*);
 extern	int	runelen(long);
 extern	int	fullrune(char*, int);
 
-extern  int	wstrtoutf(char*, Rune*, int);
-extern  int	wstrutflen(Rune*);
-
 /*
  * rune routines from converted str routines
  */
