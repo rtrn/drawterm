@@ -1,79 +1,153 @@
-/*
- * Disable Unicode until the calls to FindFirstFile etc
- * are changed to use wide character strings.
- */
-#undef UNICODE
 #include	<windows.h>
 #include	<sys/types.h>
 #include	<sys/stat.h>
 #include	<fcntl.h>
 
-#ifndef NAME_MAX
-#	define NAME_MAX 256
-#endif
 #include	"u.h"
 #include	"lib.h"
 #include	"dat.h"
 #include	"fns.h"
 #include	"error.h"
 
+#include	<libsec.h>	/* for sha1 in pathhash() */
+
 typedef struct DIR	DIR;
 typedef	struct Ufsinfo	Ufsinfo;
 
 enum
 {
-	NUID	= 256,
-	NGID	= 256,
-	MAXPATH	= 1024,
-	MAXCOMP	= 128
+	TPATH_ROOT	= 0,	// ""
+	TPATH_VOLUME	= 1,	// "C:"
+	TPATH_FILE	= 2,	// "C:\bla"
 };
 
 struct DIR
 {
-	HANDLE	handle;
-	char*	path;
-	int	index;
+	// for FindFileFirst()
+	HANDLE		handle;
 	WIN32_FIND_DATA	wfd;
+
+	// for GetLogicalDriveStrings()
+	wchar_t		*drivebuf;
+	wchar_t		*drivep;
+
+	// dont move to the next item
+	int		keep;
 };
 
 struct Ufsinfo
 {
 	int	mode;
-	int	fd;
-	int	uid;
-	int	gid;
+	HANDLE	fh;
 	DIR*	dir;
-	ulong	offset;
+	vlong	offset;
 	QLock	oq;
-	char nextname[NAME_MAX];
+	wchar_t	*path;
 };
 
-DIR*	opendir(char*);
-int	readdir(char*, DIR*);
-void	closedir(DIR*);
-void	rewinddir(DIR*);
-
-char	*base = "c:/.";
-
-static	Qid	fsqid(char*, struct stat *);
-static	void	fspath(Chan*, char*, char*);
-// static	void	fsperm(Chan*, int);
-static	ulong	fsdirread(Chan*, uchar*, int, ulong);
+static	wchar_t *catpath(wchar_t *, char *, wchar_t *);
+static	ulong	fsdirread(Chan*, uchar*, int, vlong);
 static	int	fsomode(int);
-static  int	chown(char *path, int uid, int);
+static	ulong	fsaccess(int);
+static	ulong	pathtype(wchar_t *);
+static	int	checkvolume(wchar_t *);
 
-/* clumsy hack, but not worse than the Path stuff in the last one */
-static char*
-uc2name(Chan *c)
+static ulong
+unixtime(FILETIME *ft)
 {
-	char *s;
+	vlong t;
+	t = ((vlong)ft->dwHighDateTime << 32)|((vlong)ft->dwLowDateTime);
+	t -= 116444736000000000LL;
+	return ((t<0)?(-1 - (-t - 1)) : t)/10000000;
+}
 
-	if(c->name == nil)
-		return "/";
-	s = c2name(c);
-	if(s[0]=='#' && s[1]=='U')
-		return s+2;
-	return s;
+static uvlong
+pathhash(wchar_t *p)
+{
+	uchar digest[SHA1dlen];
+	sha1((uchar*)p, wcslen(p)*sizeof(wchar_t), digest, nil);
+	return *(uvlong*)digest;
+}
+
+static ulong
+wfdtodmode(WIN32_FIND_DATA *wfd)
+{
+	int m;
+	m = DMREAD|DMWRITE|DMEXEC;
+	if(wfd->dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY)
+		m |= DMDIR;
+	if(wfd->dwFileAttributes & FILE_ATTRIBUTE_READONLY)
+		m &= ~DMWRITE;
+	m |= (m & 07)<<3;
+	m |= (m & 07)<<6;
+	return m;
+}
+
+static Qid
+wfdtoqid(wchar_t *path, WIN32_FIND_DATA *wfd)
+{
+	ulong t;
+	WIN32_FIND_DATA f;
+	Qid q;
+
+	t = pathtype(path);
+	switch(t){
+	case TPATH_VOLUME:
+	case TPATH_ROOT:
+		q.type = QTDIR;
+		q.path = pathhash(path);
+		q.vers = 0;
+		break;
+
+	case TPATH_FILE:
+		if(!wfd){
+			HANDLE h;
+			if((h = FindFirstFile(path, &f))==INVALID_HANDLE_VALUE)
+				oserror();
+			FindClose(h);
+			wfd = &f;
+		}
+		q.type = (wfd->dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY) ? QTDIR : QTFILE;
+		q.path = pathhash(path);
+		q.vers = unixtime(&wfd->ftLastWriteTime);
+		break;
+	}
+	return q;
+}
+
+static void
+wfdtodir(wchar_t *path, Dir *d, WIN32_FIND_DATA *wfd)
+{
+	WIN32_FIND_DATA f;
+
+	switch(pathtype(path)){
+	case TPATH_VOLUME:
+	case TPATH_ROOT:
+		wfd = nil;
+		d->mode = 0777 | DMDIR;
+		d->atime = 0;
+		d->mtime = 0;
+		d->length = 0;
+		break;
+
+	case TPATH_FILE:
+		if(wfd == nil){
+			HANDLE h;
+			if((h = FindFirstFile(path, &f))==INVALID_HANDLE_VALUE)
+				oserror();
+			FindClose(h);
+			wfd = &f;
+		}
+		d->mode		= wfdtodmode(wfd);
+		d->atime	= unixtime(&wfd->ftLastAccessTime);
+		d->mtime	= unixtime(&wfd->ftLastWriteTime);
+		d->length	= ((uvlong)wfd->nFileSizeHigh << 32)|((uvlong)wfd->nFileSizeLow);
+		break;
+	}
+	d->qid = wfdtoqid(path, wfd);
+	d->uid = eve;
+	d->gid = eve;
+	d->muid = eve;
 }
 
 static char*
@@ -81,36 +155,75 @@ lastelem(Chan *c)
 {
 	char *s, *t;
 
-	s = uc2name(c);
+	s = c2name(c);
 	if((t = strrchr(s, '/')) == nil)
 		return s;
 	if(t[1] == 0)
 		return t;
 	return t+1;
 }
+
+static ulong
+pathtype(wchar_t *path)
+{
+	if(path[0] == 0 || path[1] == 0)
+		return TPATH_ROOT;
+	if(path[1] == ':' && path[2] == 0)
+		return TPATH_VOLUME;
+	return TPATH_FILE;
+}
+
+static int
+checkvolume(wchar_t *path)
+{
+	wchar_t vol[MAX_PATH];
+	wchar_t volname[MAX_PATH];
+	wchar_t fsysname[MAX_PATH];
+	DWORD complen;
+	DWORD flags;
+
+	wcscpy(vol, path);
+	wcscat(vol, L"\\");
+	if(!GetVolumeInformation(
+		vol,
+		volname,
+		MAX_PATH,
+		NULL,
+		&complen,
+		&flags,
+		fsysname,
+		MAX_PATH))
+		return 0;
+
+	return 1;	
+}
+
+static wchar_t*
+wstrdup(wchar_t *s)
+{
+	wchar_t *d;
+	long n;
+
+	n = (wcslen(s)+1)*sizeof(wchar_t);
+	d = mallocz(n, 0);
+	memmove(d, s, n);
+	return d;
+}
 	
 static Chan*
 fsattach(char *spec)
 {
-	Chan *c;
-	struct stat stbuf;
 	static int devno;
 	Ufsinfo *uif;
-
-	if(stat(base, &stbuf) < 0)
-		error(strerror(errno));
-
-	c = devattach('U', spec);
+	Chan *c;
 
 	uif = mallocz(sizeof(Ufsinfo), 1);
-	uif->gid = stbuf.st_gid;
-	uif->uid = stbuf.st_uid;
-	uif->mode = stbuf.st_mode;
+	uif->path = wstrdup(L"");
 
+	c = devattach('U', spec);
 	c->aux = uif;
 	c->dev = devno++;
 	c->qid.type = QTDIR;
-/*print("fsattach %s\n", c2name(c));*/
 
 	return c;
 }
@@ -122,6 +235,7 @@ fsclone(Chan *c, Chan *nc)
 
 	uif = mallocz(sizeof(Ufsinfo), 1);
 	*uif = *(Ufsinfo*)c->aux;
+	uif->path = wstrdup(uif->path);
 	nc->aux = uif;
 
 	return nc;
@@ -130,54 +244,54 @@ fsclone(Chan *c, Chan *nc)
 static int
 fswalk1(Chan *c, char *name)
 {
-	struct stat stbuf;
-	char path[MAXPATH];
+	WIN32_FIND_DATA wfd;
+	HANDLE h;
+	wchar_t *p;
 	Ufsinfo *uif;
-
-	fspath(c, name, path);
-
-	/*	print("** fs walk '%s' -> %s\n", path, name); */
-
-	if(stat(path, &stbuf) < 0)
-		return 0;
-
+	
 	uif = c->aux;
+	p = catpath(uif->path, name, nil);
+	switch(pathtype(p)){
+	case TPATH_VOLUME:
+		if(!checkvolume(p)){
+			free(p);
+			return 0;
+		}
+	case TPATH_ROOT:
+		c->qid = wfdtoqid(p, nil);
+		break;
 
-	uif->gid = stbuf.st_gid;
-	uif->uid = stbuf.st_uid;
-	uif->mode = stbuf.st_mode;
-
-	c->qid = fsqid(path, &stbuf);
-
+	case TPATH_FILE:
+		if((h = FindFirstFile(p, &wfd)) == INVALID_HANDLE_VALUE){
+			free(p);
+			return 0;
+		}
+		FindClose(h);
+		c->qid = wfdtoqid(p, &wfd);
+		break;
+	}
+	free(uif->path);
+	uif->path = p;
 	return 1;
 }
-
-extern Cname* addelem(Cname*, char*);
 
 static Walkqid*
 fswalk(Chan *c, Chan *nc, char **name, int nname)
 {
 	int i;
-	Cname *cname;
 	Walkqid *wq;
 
 	if(nc != nil)
 		panic("fswalk: nc != nil");
 	wq = smalloc(sizeof(Walkqid)+(nname-1)*sizeof(Qid));
 	nc = devclone(c);
-	cname = c->name;
-	incref(&cname->ref);
-
 	fsclone(c, nc);
 	wq->clone = nc;
 	for(i=0; i<nname; i++){
-		nc->name = cname;
 		if(fswalk1(nc, name[i]) == 0)
 			break;
-		cname = addelem(cname, name[i]);
 		wq->qid[i] = nc->qid;
 	}
-	nc->name = cname;
 	if(i != nname){
 		cclose(nc);
 		wq->clone = nil;
@@ -190,25 +304,13 @@ static int
 fsstat(Chan *c, uchar *buf, int n)
 {
 	Dir d;
-	struct stat stbuf;
-	char path[MAXPATH];
+	Ufsinfo *uif;
 
 	if(n < BIT16SZ)
 		error(Eshortstat);
-
-	fspath(c, 0, path);
-	if(stat(path, &stbuf) < 0)
-		error(strerror(errno));
-
+	uif = c->aux;
 	d.name = lastelem(c);
-	d.uid = "unknown";
-	d.gid = "unknown";
-	d.muid = "unknown";
-	d.qid = c->qid;
-	d.mode = (c->qid.type<<24)|(stbuf.st_mode&0777);
-	d.atime = stbuf.st_atime;
-	d.mtime = stbuf.st_mtime;
-	d.length = stbuf.st_size;
+	wfdtodir(uif->path, &d, nil);
 	d.type = 'U';
 	d.dev = c->dev;
 	return convD2M(&d, buf, n);
@@ -217,11 +319,11 @@ fsstat(Chan *c, uchar *buf, int n)
 static Chan*
 fsopen(Chan *c, int mode)
 {
-	char path[MAXPATH];
+	ulong t;
 	int m, isdir;
+	wchar_t *p;
 	Ufsinfo *uif;
 
-/*print("fsopen %s\n", c2name(c));*/
 	m = mode & (OTRUNC|3);
 	switch(m) {
 	case 0:
@@ -240,31 +342,51 @@ fsopen(Chan *c, int mode)
 	}
 
 	isdir = c->qid.type & QTDIR;
-
 	if(isdir && mode != OREAD)
 		error(Eperm);
-
 	m = fsomode(m & 3);
 	c->mode = openmode(mode);
-
 	uif = c->aux;
-
-	fspath(c, 0, path);
-	if(isdir) {
-		uif->dir = opendir(path);
-		if(uif->dir == 0)
-			error(strerror(errno));
-	}	
-	else {
-		if(mode & OTRUNC)
-			m |= O_TRUNC;
-		uif->fd = open(path, m|_O_BINARY, 0666);
-
-		if(uif->fd < 0)
-			error(strerror(errno));
-	}
 	uif->offset = 0;
-
+	t = pathtype(uif->path);
+	if(isdir){
+		DIR *d;
+		d = malloc(sizeof(*d));
+		switch(t){
+		case TPATH_ROOT:
+			d->drivebuf = malloc(sizeof(wchar_t)*MAX_PATH);
+			if(GetLogicalDriveStrings(MAX_PATH-1, d->drivebuf) == 0){
+				free(d->drivebuf);
+				d->drivebuf = nil;
+				oserror();
+			}
+			d->drivep = d->drivebuf;
+			break;
+		case TPATH_VOLUME:
+		case TPATH_FILE:
+			p = catpath(uif->path, "*.*", nil);
+			d->handle = FindFirstFile(p, &d->wfd);
+			free(p);
+			if(d->handle == INVALID_HANDLE_VALUE){
+				free(d);
+				oserror();
+			}
+			break;
+		}
+		d->keep = 1;
+		uif->dir = d;
+	} else {
+		uif->dir = nil;
+		if((uif->fh = CreateFile(
+			uif->path,
+			fsaccess(mode),
+			FILE_SHARE_READ | FILE_SHARE_WRITE,
+			NULL,
+			(mode & OTRUNC) ? TRUNCATE_EXISTING : OPEN_EXISTING,
+			FILE_ATTRIBUTE_NORMAL,
+			0)) == INVALID_HANDLE_VALUE)
+			oserror();
+	}
 	c->offset = 0;
 	c->flag |= COPEN;
 	return c;
@@ -273,57 +395,57 @@ fsopen(Chan *c, int mode)
 static void
 fscreate(Chan *c, char *name, int mode, ulong perm)
 {
-	int fd, m;
-	char path[MAXPATH];
-	struct stat stbuf;
+	int m;
+	ulong t;
+	wchar_t *newpath;
 	Ufsinfo *uif;
 
 	m = fsomode(mode&3);
-
-	fspath(c, name, path);
-
 	uif = c->aux;
-
+	t = pathtype(uif->path);
+	newpath = catpath(uif->path, name, nil);
+	if(waserror()){
+		free(newpath);
+		nexterror();
+	}
 	if(perm & DMDIR) {
-		if(m)
+		wchar_t *p;
+		DIR *d;
+		if(m || t!=TPATH_FILE)
 			error(Eperm);
-
-		if(mkdir(path) < 0)
-			error(strerror(errno));
-
-		fd = open(path, 0);
-		if(fd >= 0) {
-			chmod(path, perm & 0777);
-			chown(path, uif->uid, uif->uid);
+		if(!CreateDirectory(newpath, NULL))
+			oserror();
+		d = malloc(sizeof(*d));
+		p = catpath(newpath, "*.*", nil);
+		d->handle = FindFirstFile(p, &d->wfd);
+		free(p);
+		if(d->handle == INVALID_HANDLE_VALUE){
+			free(d);
+			oserror();
 		}
-		close(fd);
-
-		uif->dir = opendir(path);
-		if(uif->dir == 0)
-			error(strerror(errno));
+		d->keep = 1;
+		uif->dir = d;
+	} else {
+		uif->dir = nil;
+		if((uif->fh = CreateFile(
+			newpath,
+			fsaccess(mode),
+			FILE_SHARE_READ | FILE_SHARE_WRITE,
+			NULL,
+			CREATE_NEW,
+			FILE_ATTRIBUTE_NORMAL,
+			0)) == INVALID_HANDLE_VALUE)
+			oserror();
 	}
-	else {
-		fd = open(path, _O_WRONLY|_O_BINARY|_O_CREAT|_O_TRUNC, 0666);
-		if(fd >= 0) {
-			if(m != 1) {
-				close(fd);
-				fd = open(path, m|_O_BINARY);
-			}
-			chmod(path, perm & 0777);
-			chown(path, uif->uid, uif->gid);
-		}
-		if(fd < 0)
-			error(strerror(errno));
-		uif->fd = fd;
-	}
-
-	if(stat(path, &stbuf) < 0)
-		error(strerror(errno));
-	c->qid = fsqid(path, &stbuf);
+	free(uif->path);
+	uif->path = newpath;
+	poperror();
+	c->qid = wfdtoqid(newpath, nil);
 	c->offset = 0;
 	c->flag |= COPEN;
 	c->mode = openmode(mode);
 }
+
 
 static void
 fsclose(Chan *c)
@@ -331,24 +453,30 @@ fsclose(Chan *c)
 	Ufsinfo *uif;
 
 	uif = c->aux;
-
 	if(c->flag & COPEN) {
-		if(c->qid.type & QTDIR)
-			closedir(uif->dir);
-		else
-			close(uif->fd);
+		if(uif->dir != nil){
+			if(uif->dir->drivebuf != nil){
+				free(uif->dir->drivebuf);
+				uif->dir->drivebuf = nil;
+			} else {
+				FindClose(uif->dir->handle);
+				free(uif->dir);
+			}
+		} else {
+			CloseHandle(uif->fh);
+		}
 	}
-
+	free(uif->path);
 	free(uif);
 }
 
 static long
 fsread(Chan *c, void *va, long n, vlong offset)
 {
-	int fd, r;
+	HANDLE fh;
+	DWORD r;
 	Ufsinfo *uif;
 
-/*print("fsread %s\n", c2name(c));*/
 	if(c->qid.type & QTDIR)
 		return fsdirread(c, va, n, offset);
 
@@ -358,166 +486,139 @@ fsread(Chan *c, void *va, long n, vlong offset)
 		qunlock(&uif->oq);
 		nexterror();
 	}
-	fd = uif->fd;
+	fh = uif->fh;
 	if(uif->offset != offset) {
-		r = lseek(fd, offset, 0);
-		if(r < 0)
-			error(strerror(errno));
+		LONG high;
+		high = offset>>32;
+		offset = SetFilePointer(fh, (LONG)(offset & 0xFFFFFFFF), &high, FILE_BEGIN);
+		offset |= (vlong)high<<32;
 		uif->offset = offset;
 	}
-
-	n = read(fd, va, n);
-	if(n < 0)
-		error(strerror(errno));
-
+	r = 0;
+	if(!ReadFile(fh, va, (DWORD)n, &r, NULL))
+		oserror();
+	n = r;
 	uif->offset += n;
 	qunlock(&uif->oq);
 	poperror();
-
 	return n;
 }
 
 static long
 fswrite(Chan *c, void *va, long n, vlong offset)
 {
-	int fd, r;
+	HANDLE fh;
+	DWORD w;
 	Ufsinfo *uif;
 
-	uif = c->aux;
+	if(c->qid.type & QTDIR)
+		return fsdirread(c, va, n, offset);
 
+	uif = c->aux;
 	qlock(&uif->oq);
 	if(waserror()) {
 		qunlock(&uif->oq);
 		nexterror();
 	}
-	fd = uif->fd;
+	fh = uif->fh;
 	if(uif->offset != offset) {
-		r = lseek(fd, offset, 0);
-		if(r < 0)
-			error(strerror(errno));
+		LONG high;
+		high = offset>>32;
+		offset = SetFilePointer(fh, (LONG)(offset & 0xFFFFFFFF), &high, FILE_BEGIN);
+		offset |= (vlong)high<<32;
 		uif->offset = offset;
 	}
-
-	n = write(fd, va, n);
-	if(n < 0)
-		error(strerror(errno));
-
+	w = 0;
+	if(!WriteFile(fh, va, (DWORD)n, &w, NULL))
+		oserror();
+	n = w;
 	uif->offset += n;
 	qunlock(&uif->oq);
 	poperror();
-
 	return n;
 }
 
 static void
 fsremove(Chan *c)
 {
-	int n;
-	char path[MAXPATH];
+	Ufsinfo *uif;
 
-	fspath(c, 0, path);
-	if(c->qid.type & QTDIR)
-		n = rmdir(path);
-	else
-		n = remove(path);
-	if(n < 0)
-		error(strerror(errno));
+	uif = c->aux;
+	if(c->qid.type & QTDIR){
+		if(!RemoveDirectory(uif->path))
+			oserror();
+	} else {
+		if(!DeleteFile(uif->path))
+			oserror();
+	}
 }
 
 static int
 fswstat(Chan *c, uchar *buf, int n)
 {
-	Dir d;
-	struct stat stbuf;
-	char old[MAXPATH], new[MAXPATH];
-	char strs[MAXPATH*3], *p;
+	char strs[MAX_PATH*3];
 	Ufsinfo *uif;
+	Dir d;
 
 	if (convM2D(buf, n, &d, strs) != n)
 		error(Ebadstat);
-	
-	fspath(c, 0, old);
-	if(stat(old, &stbuf) < 0)
-		error(strerror(errno));
-
 	uif = c->aux;
+	if(pathtype(uif->path) != TPATH_FILE)
+		error(Ebadstat);
+	/* change name */
+	if(d.name[0]){
+		wchar_t *base, *newpath;
+		int l;
 
-//	if(uif->uid != stbuf.st_uid)
-//		error(Eowner);
-
-	if(d.name[0] && strcmp(d.name, lastelem(c)) != 0) {
-		fspath(c, 0, old);
-		strcpy(new, old);
-		p = strrchr(new, '/');
-		strcpy(p+1, d.name);
-		if(rename(old, new) < 0)
-			error(strerror(errno));
+		base = wstrdup(uif->path);
+		if(waserror()){
+			free(base);
+			nexterror();
+		}
+		/* replace last path-element with d.name */
+		l = wcslen(base)-1;
+		if(l <= 0)
+			error(Ebadstat);
+		for(;l>0; l--){
+			if(base[l-1]=='\\')
+				break;
+		}
+		if(l <= 0)
+			error(Ebadstat);
+		base[l] = 0;
+		newpath = catpath(base, d.name, nil);
+		free(base), base = newpath;
+		if(wcscmp(uif->path, newpath)!=0){
+			if(!MoveFile(uif->path, newpath))
+				oserror();
+		}
+		free(uif->path);
+		uif->path = newpath;
+		poperror();
 	}
 
-	fspath(c, 0, old);
-	if(~d.mode != 0 && (int)(d.mode&0777) != (int)(stbuf.st_mode&0777)) {
-		if(chmod(old, d.mode&0777) < 0)
-			error(strerror(errno));
-		uif->mode &= ~0777;
-		uif->mode |= d.mode&0777;
-	}
-/*
-	p = name2pass(gid, d.gid);
-	if(p == 0)
-		error(Eunknown);
-
-	if(p->id != stbuf.st_gid) {
-		if(chown(old, stbuf.st_uid, p->id) < 0)
-			error(sys_errlist[errno]);
-
-		uif->gid = p->id;
-	}
-*/
-	return n;
+	/* fixme: change attributes */
+	c->qid = wfdtoqid(uif->path, nil);
+	return n;	
 }
 
-static Qid
-fsqid(char *p, struct stat *st)
+static wchar_t*
+catpath(wchar_t *base, char *cext, wchar_t *wext)
 {
-	Qid q;
-	int dev;
-	ulong h;
-	static int nqdev;
-	static uchar *qdev;
+	wchar_t *path;
+	long n, m;
 
-	if(qdev == 0)
-		qdev = mallocz(65536U, 1);
-
-	q.type = 0;
-	if((st->st_mode&S_IFMT) ==  S_IFDIR)
-		q.type = QTDIR;
-
-	dev = st->st_dev & 0xFFFFUL;
-	if(qdev[dev] == 0)
-		qdev[dev] = ++nqdev;
-
-	h = 0;
-	while(*p != '\0')
-		h += *p++ * 13;
-	
-	q.path = (vlong)qdev[dev]<<32;
-	q.path |= h;
-	q.vers = st->st_mtime;
-
-	return q;
-}
-
-static void
-fspath(Chan *c, char *ext, char *path)
-{
-	strcpy(path, base);
-	strcat(path, "/");
-	strcat(path, uc2name(c));
-	if(ext) {
-		strcat(path, "/");
-		strcat(path, ext);
-	}
-	cleanname(path);
+	n = wcslen(base);
+	m = wext!=nil ? wcslen(wext) : strlen(cext)*4;
+	path = malloc((n+m+2)*sizeof(wchar_t));
+	memmove(path, base, n*sizeof(wchar_t));
+	if(n > 0 && path[n-1] != '\\') path[n++] = '\\';
+	if(wext != nil)
+		memmove(path+n, wext, m*sizeof(wchar_t));
+	else
+		m = MultiByteToWideChar(CP_UTF8,0,cext,-1,path+n,m);
+	path[n+m] = 0;
+	return path;
 }
 
 static int
@@ -534,78 +635,87 @@ isdots(char *name)
 	return 0;
 }
 
-static int
-p9readdir(char *name, Ufsinfo *uif)
-{
-	if(uif->nextname[0]){
-		strcpy(name, uif->nextname);
-		uif->nextname[0] = 0;
-		return 1;
-	}
-
-	return readdir(name, uif->dir);
-}
-
 static ulong
-fsdirread(Chan *c, uchar *va, int count, ulong offset)
+fsdirread(Chan *c, uchar *va, int count, vlong offset)
 {
 	int i;
+	ulong t;
 	Dir d;
 	long n;
-	char de[NAME_MAX];
-	struct stat stbuf;
-	char path[MAXPATH], dirpath[MAXPATH];
 	Ufsinfo *uif;
+	char de[MAX_PATH*3];
+	wchar_t *p;
 
-/*print("fsdirread %s\n", c2name(c));*/
 	i = 0;
 	uif = c->aux;
-
 	errno = 0;
+
+	t = pathtype(uif->path);
 	if(uif->offset != offset) {
 		if(offset != 0)
 			error("bad offset in fsdirread");
 		uif->offset = offset;  /* sync offset */
-		uif->nextname[0] = 0;
-		rewinddir(uif->dir);
+		switch(t){
+		case TPATH_ROOT:
+			uif->dir->drivep = uif->dir->drivebuf;
+			break;
+		case TPATH_VOLUME:
+		case TPATH_FILE:
+			FindClose(uif->dir->handle);
+			p = catpath(uif->path, "*.*", nil);
+			uif->dir->handle = FindFirstFile(p, &uif->dir->wfd);
+			free(p);
+			if(uif->dir->handle == INVALID_HANDLE_VALUE)
+				oserror();
+			break;
+		}
+		uif->dir->keep = 1;
 	}
 
-	fspath(c, 0, dirpath);
-
 	while(i+BIT16SZ < count) {
-		if(!p9readdir(de, uif))
-			break;
-
+		if(!uif->dir->keep) {
+			switch(t){
+			case TPATH_ROOT:
+				uif->dir->drivep += 4;
+				if(*uif->dir->drivep == 0)
+					goto out;
+				break;
+			case TPATH_VOLUME:
+			case TPATH_FILE:
+				if(!FindNextFile(uif->dir->handle, &uif->dir->wfd))
+					goto out;
+				break;
+			}
+		} else {
+			uif->dir->keep = 0;
+		}
+		if(t == TPATH_ROOT){
+			uif->dir->drivep[2] = 0;
+			WideCharToMultiByte(CP_UTF8,0,uif->dir->drivep,-1,de,sizeof(de),0,0);
+		} else {
+			WideCharToMultiByte(CP_UTF8,0,uif->dir->wfd.cFileName,-1,de,sizeof(de),0,0);
+		}
 		if(de[0]==0 || isdots(de))
 			continue;
-
 		d.name = de;
-		sprint(path, "%s/%s", dirpath, de);
-		memset(&stbuf, 0, sizeof stbuf);
-
-		if(stat(path, &stbuf) < 0) {
-			print("dir: bad path %s\n", path);
-			/* but continue... probably a bad symlink */
+		if(t == TPATH_ROOT){
+			p = catpath(uif->path, nil, uif->dir->drivep);
+			wfdtodir(p, &d, nil);
+		} else {
+			p = catpath(uif->path, nil, uif->dir->wfd.cFileName);
+			wfdtodir(p, &d, &uif->dir->wfd);
 		}
-
-		d.uid = "unknown";
-		d.gid = "unknown";
-		d.muid = "unknown";
-		d.qid = fsqid(path, &stbuf);
-		d.mode = (d.qid.type<<24)|(stbuf.st_mode&0777);
-		d.atime = stbuf.st_atime;
-		d.mtime = stbuf.st_mtime;
-		d.length = stbuf.st_size;
+		free(p);
 		d.type = 'U';
 		d.dev = c->dev;
 		n = convD2M(&d, (uchar*)va+i, count-i);
 		if(n == BIT16SZ){
-			strcpy(uif->nextname, de);
+			uif->dir->keep = 1;
 			break;
 		}
 		i += n;
 	}
-/*print("got %d\n", i);*/
+out:
 	uif->offset += i;
 	return i;
 }
@@ -625,65 +735,29 @@ fsomode(int m)
 	error(Ebadarg);
 	return 0;
 }
-void
-closedir(DIR *d)
-{
-	FindClose(d->handle);
-	free(d->path);
-}
 
-int
-readdir(char *name, DIR *d)
+static ulong
+fsaccess(int m)
 {
-	if(d->index != 0) {
-		if(FindNextFile(d->handle, &d->wfd) == FALSE)
-			return 0;
+	ulong a;
+	a = 0;
+	switch(m & 3){
+	default:
+		error(Eperm);
+		break;
+	case OREAD:
+		a = GENERIC_READ;
+		break;
+	case OWRITE:
+		a = GENERIC_WRITE;
+		break;
+	case ORDWR:
+		a = GENERIC_READ | GENERIC_WRITE;
+		break;
 	}
-	strcpy(name, (char*)d->wfd.cFileName);
-	d->index++;
-
-	return 1;
+	return a;
 }
 
-void
-rewinddir(DIR *d)
-{
-	FindClose(d->handle);
-	d->handle = FindFirstFile(d->path, &d->wfd);
-	d->index = 0;
-}
-
-static int
-chown(char *path, int uid, int perm)
-{
-/*	panic("chown"); */
-	return 0;
-}
-
-DIR*
-opendir(char *p)
-{
-	DIR *d;
-	char path[MAX_PATH];
-
-	
-	snprint(path, sizeof(path), "%s/*.*", p);
-
-	d = mallocz(sizeof(DIR), 1);
-	if(d == 0)
-		return 0;
-
-	d->index = 0;
-
-	d->handle = FindFirstFile(path, &d->wfd);
-	if(d->handle == INVALID_HANDLE_VALUE) {
-		free(d);
-		return 0;
-	}
-
-	d->path = strdup(path);
-	return d;
-}
 
 Dev fsdevtab = {
 	'U',

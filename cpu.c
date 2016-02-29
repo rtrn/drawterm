@@ -29,7 +29,6 @@ static AuthInfo *p9any(int);
 static char	*system;
 static int	cflag;
 extern int	dbg;
-extern char*   base;   // fs base for devroot 
 
 static char	*srvname = "ncpu";
 static char	*ealgs = "rc4_256 sha1";
@@ -73,7 +72,7 @@ exits(char *s)
 void
 usage(void)
 {
-	fprint(2, "usage: drawterm [-a authserver] [-c cpuserver] [-s secstore] [-u user]\n");
+	fprint(2, "usage: drawterm [-a authserver] [-c cpuserver] [-r root] [-s secstore] [-u user]\n");
 	exits("usage");
 }
 int fdd;
@@ -116,6 +115,7 @@ cpumain(int argc, char **argv)
 	secstoreserver = nil;
 	authserver = getenv("auth");
 	system = getenv("cpu");
+
 	ARGBEGIN{
 	case 'a':
 		authserver = EARGF(usage());
@@ -144,7 +144,10 @@ cpumain(int argc, char **argv)
 		keyspec = EARGF(usage());
 		break;
 	case 'r':
-		base = EARGF(usage());
+		snprint(buf, sizeof(buf), "/root/%s", EARGF(usage()));
+		cleanname(buf);
+		if(bind(buf, "/root", MREPL) < 0)
+			fatal(1, "bind /root");
 		break;
 	case 's':
 		secstoreserver = EARGF(usage());
@@ -158,6 +161,9 @@ cpumain(int argc, char **argv)
 
 	if(argc != 0)
 		usage();
+
+	if(bind("/root", "/", MAFTER) < 0)
+		fatal(1, "bind /root");
 
 	if(system == nil)
 		system = readcons("cpu", nil, 0);
@@ -192,14 +198,14 @@ cpumain(int argc, char **argv)
 	 *  of /mnt/term
 	 */
 	if(readstr(data, buf, sizeof(buf)) < 0)
-		fatal(1, "waiting for FS: %r");
+		fatal(1, "waiting for FS");
 	if(strncmp("FS", buf, 2) != 0) {
 		print("remote cpu: %s", buf);
 		exits(buf);
 	}
 
 	if(readstr(data, buf, sizeof buf) < 0)
-		fatal(1, "waiting for remote export: %r");
+		fatal(1, "waiting for remote export");
 	if(strcmp(buf, "/") != 0){
 		print("remote cpu: %s" , buf);
 		exits(buf);

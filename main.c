@@ -10,6 +10,7 @@ char *argv0;
 char *user;
 
 extern int errfmt(Fmt*);
+
 void
 sizebug(void)
 {
@@ -54,9 +55,10 @@ main(int argc, char **argv)
 		panic("bind #i: %r");
 	if(bind("#I", "/net", MBEFORE) < 0)
 		panic("bind #I: %r");
-	if(bind("#U", "/", MAFTER) < 0)
+	if(bind("#U", "/root", MREPL) < 0)
 		panic("bind #U: %r");
-	bind("#A", "/dev", MAFTER);
+	if(bind("#A", "/dev", MAFTER) < 0)
+		panic("bind #A: %r");
 
 	if(open("/dev/cons", OREAD) != 0)
 		panic("open0: %r");
@@ -123,4 +125,3 @@ findkey(char **puser, char *dom)
 	}
 	return nil;
 }
-
