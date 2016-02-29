@@ -100,7 +100,7 @@ mountfactotum(void)
 void
 cpumain(int argc, char **argv)
 {
-	char dat[MaxStr], buf[MaxStr], cmd[MaxStr], *err, *secstoreserver, *p, *s;
+	char buf[MaxStr], cmd[MaxStr], *err, *secstoreserver, *p, *s;
 	int fd, ms, data;
 
 	/* see if we should use a larger message size */
@@ -185,10 +185,7 @@ cpumain(int argc, char **argv)
 	/* Tell the remote side the command to execute and where our working directory is */
 	if(cflag)
 		writestr(data, cmd, "command", 0);
-	if(getcwd(dat, sizeof(dat)) == 0)
-		writestr(data, "NO", "dir", 0);
-	else
-		writestr(data, dat, "dir", 0);
+	writestr(data, "NO", "dir", 0);
 
 	/* 
 	 *  Wait for the other end to execute and start our file service
