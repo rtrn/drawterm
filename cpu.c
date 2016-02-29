@@ -159,12 +159,12 @@ cpumain(int argc, char **argv)
 	if(argc != 0)
 		usage();
 
-	if(authserver == nil)
-		authserver = readcons("authserver", nil, 0);
 	if(system == nil)
-		system = readcons("cpuserver", nil, 0);
+		system = readcons("cpu", nil, 0);
 	if(user == nil)
 		user = readcons("user", nil, 0);
+	if(authserver == nil)
+		authserver = readcons("auth", system, 0);
 
 	if(mountfactotum() < 0){
 		if(secstoreserver == nil)
