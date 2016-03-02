@@ -1,6 +1,5 @@
 #include <u.h>
 #include <libc.h>
-#include <ctype.h>
 
 int
 encodefmt(Fmt *f)

@@ -340,10 +340,11 @@ WindowProc(HWND hwnd, UINT msg, WPARAM wparam, LPARAM lparam)
 		}
 		return DefWindowProc(hwnd, msg, wparam, lparam);
 	case WM_MOUSEWHEEL:
-		if((int)(wparam & 0xFFFF0000) > 0)
+		if(GET_WHEEL_DELTA_WPARAM(wparam) > 0)
 			b |= 8;
 		else
 			b |= 16;
+		wparam = LOWORD(wparam);
 		/* FALLTHROUGH */
 	case WM_MOUSEMOVE:
 	case WM_LBUTTONUP:

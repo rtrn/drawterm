@@ -14,7 +14,6 @@ OFILES=\
 	convT2M.$O\
 	convTR2M.$O\
 	nvcsum.$O\
-	opasstokey.$O\
 	passtokey.$O\
 
 default: $(LIB)
@@ -24,4 +23,3 @@ $(LIB): $(OFILES)
 
 %.$O: %.c
 	$(CC) $(CFLAGS) $*.c
-

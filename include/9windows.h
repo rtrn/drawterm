@@ -10,6 +10,7 @@
 #include <time.h>
 #include <assert.h>
 #include <stdarg.h>
+#include <ctype.h>
 
 /* disable various silly warnings */
 #ifdef MSVC

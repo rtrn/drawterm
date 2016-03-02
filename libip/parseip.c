@@ -1,6 +1,5 @@
 #include <u.h>
 #include <libc.h>
-#include <ctype.h>
 #include <ip.h>
 
 char*
@@ -74,6 +73,10 @@ parseip(uchar *to, char *from)
 		op = p;
 		x = strtoul(p, &p, 16);
 		if(*p == '.' || (*p == 0 && i == 0)){	/* ends with v4? */
+			if(i > IPaddrlen-4){
+				memset(to, 0, IPaddrlen);
+				return -1;		/* parse error */
+			}
 			p = v4parseip(to+i, op);
 			i += 4;
 			break;

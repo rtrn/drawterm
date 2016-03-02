@@ -15,6 +15,7 @@
 typedef struct Cursor Cursor;
 
 #undef	long
+#undef	ulong
 #define	Font		XFont
 #define	Screen	XScreen
 #define	Display	XDisplay
@@ -33,6 +34,7 @@ typedef struct Cursor Cursor;
 #undef	Display
 #undef	Cursor
 #define	long	int
+#define	ulong	p9_ulong
 
 /* perfect approximation to NTSC = .299r+.587g+.114b when 0 ≤ r,g,b < 256 */
 #define RGB2K(r,g,b)	((156763*(r)+307758*(g)+59769*(b))>>19)
@@ -1485,13 +1487,10 @@ _xgetsnarf(XDisplay *xd)
 	 * come, and we have no way to time out.  Instead, we will clear
 	 * local property #1, request our buddy to fill it in for us, and poll
 	 * until he's done or we get tired of waiting.
-	 *
-	 * We should try to go for utf8string instead of XA_STRING,
-	 * but that would add to the polling.
 	 */
 	prop = 1;
-	XChangeProperty(xd, xdrawable, prop, XA_STRING, 8, PropModeReplace, (uchar*)"", 0);
-	XConvertSelection(xd, clipboard, XA_STRING, prop, xdrawable, CurrentTime);
+	XChangeProperty(xd, xdrawable, prop, utf8string, 8, PropModeReplace, (uchar*)"", 0);
+	XConvertSelection(xd, clipboard, utf8string, prop, xdrawable, CurrentTime);
 	XFlush(xd);
 	lastlen = 0;
 	for(i=0; i<10 || (lastlen!=0 && i<30); i++){

@@ -1,7 +1,6 @@
 #include <u.h>
 #include <sys/socket.h>
 #include <sys/un.h>
-#include <ctype.h>
 #include <pwd.h>
 #include <libc.h>
 #include <auth.h>
