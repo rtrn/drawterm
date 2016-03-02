@@ -587,7 +587,7 @@ p9any(int fd)
 		fatal(1, "cannot write user/domain choice in p9any");
 	if(v2){
 		if((n = readstr(fd, buf, sizeof buf)) < 0)
-			fatal(1, "cannot read OK in p9any: got %d %s", n, buf);
+			fatal(1, "cannot read OK in p9any");
 		if(memcmp(buf, "OK\0", 3) != 0)
 			fatal(1, "did not get OK in p9any");
 	}

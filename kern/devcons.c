@@ -419,16 +419,16 @@ kbdputc(Queue *q, int c)
 	static int collecting, nk;
 	static Rune kc[5];
 
-	 if(c == Kalt){
-		 collecting = 1;
-		 nk = 0;
-		 return 0;
-	 }
+	if(c == Kalt){
+		collecting = 1;
+		nk = 0;
+		return 0;
+	}
 
-	 if(!collecting){
-		 _kbdputc(c);
-		 return 0;
-	 }
+	if(!collecting){
+		_kbdputc(c);
+		return 0;
+	}
 
 	kc[nk++] = c;
 	c = latin1(kc, nk);
@@ -438,7 +438,7 @@ kbdputc(Queue *q, int c)
 		_kbdputc(c);
 	else
 		for(i=0; i<nk; i++)
-		 	_kbdputc(kc[i]);
+			_kbdputc(kc[i]);
 	nk = 0;
 	collecting = 0;
 
