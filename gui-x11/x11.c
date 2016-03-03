@@ -1625,7 +1625,7 @@ clipwrite(char *buf)
 }
 
 long
-showfilewrite(char *a, int n)
+fullscreenwrite(char *a, int n)
 {
 	error("not implemented");
 	return -1;
