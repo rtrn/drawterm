@@ -113,6 +113,7 @@ int		freebroken(void);
 void		freepte(Segment*, Pte*);
 void		freesegs(int);
 void		freesession(Session*);
+long		fullscreenwrite(char*, int);
 uintptr		getmalloctag(void*);
 uintptr		getrealloctag(void*);
 void		gotolabel(Label*);

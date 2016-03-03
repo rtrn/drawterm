@@ -443,6 +443,9 @@ WindowProc(HWND hwnd, UINT msg, WPARAM wparam, LPARAM lparam)
 		case VK_RIGHT:
 			kbdputc(kbdq, Kright);
 			break;
+		case VK_F11:
+			fullscreenwrite(nil, 0);
+			break;
 		}
 		break;
 
@@ -645,6 +648,31 @@ clipwrite(char *buf)
 	SetClipboardData(CF_TEXT, h);
 
 	CloseClipboard();
+	return n;
+}
+
+long
+fullscreenwrite(char *a, int n)
+{
+	static WINDOWPLACEMENT prev = {sizeof(WINDOWPLACEMENT)};
+	static MONITORINFO mi = {sizeof(MONITORINFO)};
+	LONG style;
+	RECT r;
+
+	style = GetWindowLong(window, GWL_STYLE);
+	if(style & WS_OVERLAPPEDWINDOW){
+		if(GetWindowPlacement(window, &prev))
+		if(GetMonitorInfo(MonitorFromWindow(window, MONITOR_DEFAULTTOPRIMARY), &mi)){
+			r = mi.rcMonitor;
+			SetWindowLong(window, GWL_STYLE, style&~WS_OVERLAPPEDWINDOW);
+			SetWindowPos(window, HWND_TOP, r.left, r.top, r.right-r.left, r.bottom-r.top, SWP_NOOWNERZORDER|SWP_FRAMECHANGED);
+		}
+	}else{
+		SetWindowLong(window, GWL_STYLE, style|WS_OVERLAPPEDWINDOW);
+		SetWindowPlacement(window, &prev);
+		SetWindowPos(window, nil, 0, 0, 0, 0, SWP_NOMOVE|SWP_NOSIZE|SWP_NOZORDER|SWP_NOOWNERZORDER|SWP_FRAMECHANGED);
+	}
+	UpdateWindow(window);
 	return n;
 }
 

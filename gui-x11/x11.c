@@ -1624,3 +1624,9 @@ clipwrite(char *buf)
 	return 0;
 }
 
+long
+showfilewrite(char *a, int n)
+{
+	error("not implemented");
+	return -1;
+}

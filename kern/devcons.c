@@ -455,6 +455,7 @@ enum{
 	Qcputime,
 	Qdrivers,
 	Qkprint,
+	Qfullscreen,
 	Qhostdomain,
 	Qhostowner,
 	Qnull,
@@ -488,6 +489,7 @@ static Dirtab consdir[]={
 	"cpunote",	{Qcpunote},	0,		0444,
 	"cputime",	{Qcputime},	6*NUMSIZE,	0444,
 	"drivers",	{Qdrivers},	0,		0444,
+	"fullscreen",	{Qfullscreen},	0,	0220,
 	"hostdomain",	{Qhostdomain},	DOMLEN,		0664,
 	"hostowner",	{Qhostowner},	0,	0664,
 	"kprint",		{Qkprint, 0, QTEXCL},	0,	DMEXCL|0440,
@@ -887,6 +889,9 @@ conswrite(Chan *c, void *va, long n, vlong off)
 
 	case Qhostdomain:
 		return hostdomainwrite(a, n);
+
+	case Qfullscreen:
+		return fullscreenwrite(a, n);
 
 	case Quser:
 		return userwrite(a, n);
