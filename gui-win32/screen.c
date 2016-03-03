@@ -323,7 +323,8 @@ WindowProc(HWND hwnd, UINT msg, WPARAM wparam, LPARAM lparam)
 {
 	PAINTSTRUCT paint;
 	HDC hdc;
-	LONG x, y, b;
+	LONG b;
+	POINT p;
 	int i;
 	Rectangle r;
 
@@ -353,8 +354,10 @@ WindowProc(HWND hwnd, UINT msg, WPARAM wparam, LPARAM lparam)
 	case WM_LBUTTONDOWN:
 	case WM_MBUTTONDOWN:
 	case WM_RBUTTONDOWN:
-		x = LOWORD(lparam);
-		y = HIWORD(lparam);
+		p.x = (short)LOWORD(lparam);
+		p.y = (short)HIWORD(lparam);
+		if(b != 0)	/* WM_MOUSEWHEEL has screen coordinates */
+			ScreenToClient(hwnd, &p);
 		if(wparam & MK_LBUTTON)
 			b |= 1;
 		if(wparam & MK_MBUTTON)
@@ -380,8 +383,8 @@ WindowProc(HWND hwnd, UINT msg, WPARAM wparam, LPARAM lparam)
 			mouse.wi = (i+1)%Mousequeue;
 			mouse.ri = i;
 		}
-		mouse.queue[i].xy.x = x;
-		mouse.queue[i].xy.y = y;
+		mouse.queue[i].xy.x = p.x;
+		mouse.queue[i].xy.y = p.y;
 		mouse.queue[i].buttons = b;
 		mouse.queue[i].msec = ticks();
 		mouse.lastb = b;
