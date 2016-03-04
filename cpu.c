@@ -100,7 +100,7 @@ void
 cpumain(int argc, char **argv)
 {
 	char buf[MaxStr], cmd[MaxStr], *err, *secstoreserver, *p, *s;
-	int fd, ms, data;
+	int fd, ms, data, sectries;
 
 	/* see if we should use a larger message size */
 	fd = open("/dev/draw", OREAD);
@@ -176,7 +176,10 @@ cpumain(int argc, char **argv)
 		if(secstoreserver == nil)
 			secstoreserver = authserver;
 	 	if(havesecstore(secstoreserver, user)){
-			s = secstorefetch(secstoreserver, user, nil);
+			sectries = 0;
+			while((s=secstorefetch(secstoreserver, user, nil)) == nil)
+				if(++sectries >= 5)
+					break;
 			if(s){
 				if(strlen(s) >= sizeof secstorebuf)
 					sysfatal("secstore data too big");
